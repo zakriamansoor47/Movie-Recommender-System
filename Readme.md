@@ -190,4 +190,3 @@ You can test the deployed application without installing anything locally:
 ## 👤 Author
 
 Developed with ❤️ by **Zakria Mansoor**
-- Live Demo: [Movie Recommender System](https://movie-recommender-system-by-zakria.streamlit.app/)
