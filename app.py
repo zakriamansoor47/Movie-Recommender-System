@@ -4,12 +4,18 @@ from sklearn.metrics.pairwise import cosine_similarity
 import pickle
 import requests
 
+# Fetch movie poster
+@st.cache_data(ttl=86400)
 def fetch_poster(movie_id):
-    url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key=8265bd1679663a7ea12ac168da84d2e8"
-    response = requests.get(url)
-    data = response.json()
-    return data.get("poster_path", None)
+    try:
+        url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key=8265bd1679663a7ea12ac168da84d2e8"
+        response = requests.get(url)
+        data = response.json()
+        return data.get("poster_path", None)
 
+    except Exception:
+        return None
+    
 def recommend(movie, top_n=5):
     matches = movies[movies["title"].str.lower() == movie.strip().lower()]
 
@@ -18,21 +24,59 @@ def recommend(movie, top_n=5):
         return
 
     movie_index = matches.index[0]
-    distances = cosine_similarity(vectors[movie_index], vectors)
-    movie_list = sorted(list(enumerate(distances[0])), reverse=True, key=lambda x: x[1])[1 : top_n + 1]
+    distances = cosine_similarity(vectors[movie_index], vectors).flatten()
+    movie_list = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])[1 : top_n + 1]
     recommended_movies = [movies.iloc[i[0]].title for i in movie_list]
     recommended_movies_posters = [fetch_poster(movies.iloc[i[0]].id) for i in movie_list]
 
     return recommended_movies, recommended_movies_posters
+# def recommend(movie, top_n=5):
+#     matches = movies[movies["title"].str.lower() == movie.strip().lower()]
 
+#     if matches.empty:
+#         print(f"Movie '{movie}' not found!")
+#         return
 
-# Load the data
-movies_dict = pickle.load(open("movies.pkl", "rb"))
-movies = pd.DataFrame(movies_dict)
-vectors = pickle.load(open("vectors.pkl", "rb"))
+#     movie_index = matches.index[0]
+#     distances = cosine_similarity(vectors[movie_index], vectors)
+#     movie_list = sorted(list(enumerate(distances[0])), reverse=True, key=lambda x: x[1])[1 : top_n + 1]
+#     recommended_movies = [movies.iloc[i[0]].title for i in movie_list]
+#     recommended_movies_posters = [fetch_poster(movies.iloc[i[0]].id) for i in movie_list]
+
+#     return recommended_movies, recommended_movies_posters
 
 st.set_page_config(page_title="Movie Recommender", page_icon="🎬", layout="wide")
 
+# Load movies
+@st.cache_resource
+def load_movies():
+    with open('movies.pkl', 'rb') as f:
+        return pd.DataFrame(pickle.load(f))
+
+movies = load_movies().reset_index(drop=True)
+
+# Load vectors
+@st.cache_resource
+def load_vectors():
+    with open('vectors.pkl', 'rb') as f:
+        return pickle.load(f)
+
+vectors = load_vectors()
+
+# Search movies - return maximum 10 results
+@st.cache_data
+def search_movies(query):
+    matches = movies[
+        movies['title'].str.contains(
+            query,
+            case=False,
+            na=False,
+            regex=False
+        )
+    ]
+
+    return matches['title'].drop_duplicates().head(20).tolist()
+ 
 st.markdown(
     """
 
@@ -104,12 +148,33 @@ st.divider()
 st.markdown("### 🔍 Find Your Next Movie")
 col1, col2 = st.columns([3, 1])
 with col1:
-    selected_movie = st.selectbox(
-        "Choose a movie",
-        movies["title"].dropna().unique(),
-        index=None,
-        placeholder="Search for a movie...",
+    search_query = st.text_input(
+        "Search for a movie",
+        placeholder="Start typing a movie name...",
+        key="movie_search"
     )
+
+    selected_movie = None
+
+    if len(search_query.strip()) >= 2:
+
+        search_results = search_movies(search_query.strip())
+
+        if search_results:
+
+            selected_movie = st.selectbox(
+                "Search results",
+                search_results,
+                index=None,
+                placeholder="Select a movie...",
+                key="selected_movie"
+            )
+
+        else:
+            st.info("No movies found.")
+
+    elif search_query:
+        st.caption("Type at least 2 characters...")
 with col2:
     num_recommendations = st.number_input(
         "Number of recommendations", min_value=1, max_value=10, value=5
@@ -117,7 +182,6 @@ with col2:
 
 st.write("")
 if st.button("✨ Discover Similar Movies", use_container_width=True):
-
     if selected_movie:
         recommended_movies, recommended_movies_posters = recommend(selected_movie, int(num_recommendations))
         st.divider()
